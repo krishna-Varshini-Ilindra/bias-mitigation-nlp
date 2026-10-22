@@ -1,55 +1,58 @@
-# Can We Fix Bias in Sentiment Models?
+# Can Score Calibration Fix Gender Bias in a Sentiment Model?
 
 **Author:** Krishna Varshini Ilindra  
-**Background:** M.S. in Computer Science, University of Bridgeport  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Software Developer  
-**Run the notebook:** [Open in Colab](https://github.com/krishna-Varshini-Ilindra/bias-mitigation-nlp)
+**Background:** M.S. in Computer Science, University of Bridgeport · Software Engineer, Octagon IT  
+**Run the notebook:** [Open in Colab](https://colab.research.google.com/github/krishna-Varshini-Ilindra/bias-mitigation-nlp/blob/main/bias_mitigation_nlp.ipynb)
 
 ---
 
 ## The Starting Point
 
-In my previous project, I measured demographic bias in sentiment 
-analysis models and found that female-associated text consistently 
-received higher positive sentiment scores than identical 
-male-associated text — a gap of 0.0276.
+In my [previous project](https://github.com/krishna-Varshini-Ilindra/sentiment-bias-nlp), I measured demographic bias in a RoBERTa sentiment model using template sentences that differ only in a name. On positive sentences, female names received slightly higher positive scores than male names.
 
-Finding the bias felt incomplete. The natural next question was: 
-can it actually be fixed?
-
-That's what this project explores.
+The natural next question was: can a gap like this be reduced without retraining the model?
 
 ---
 
 ## The Approach
 
-Rather than retraining the model from scratch — which requires 
-significant compute and time — I tested a lightweight technique 
-called **Post-hoc Score Calibration**.
+I tested two lightweight ideas on the same model (`cardiffnlp/twitter-roberta-base-sentiment`) and the same 4,096 template sentences (8 templates × 32 names × 16 emotion words).
 
-The idea is simple:
-- Calculate how much each gender group is systematically 
-  over or under-scored on average
-- Subtract that offset from their predictions
-- Measure whether the gap closed — and whether accuracy suffered
+**1. Counterfactual Data Augmentation (CDA)**
+I created a "twin" of every sentence by swapping the name for one of the opposite gender.
 
-No retraining. No additional data collection. Just a mathematical 
-adjustment applied after the model makes its predictions.
-
-This approach matters because in real-world production systems, 
-retraining is often not an option. A fast, deployable fix is 
-far more practical.
+**2. Post-hoc Score Calibration (equalized means)**
+- Compute each gender's mean positive score across all sentences
+- Shift female scores down and male scores up by half the difference, so the two overall means match
+- Measure the gap again, along with accuracyal.
 
 ---
 
 ## Results
 
-| Metric | Before Calibration | After Calibration |
+### Baseline (before any fix)
+
+| Gender | Positive sentences | Negative sentences |
 |---|---|---|
-| Gender bias gap | 0.0276 | 0.0139 |
-| Female accuracy | 0.947 | 0.946 |
-| Male accuracy | 0.936 | 0.938 |
-| **Bias reduction** | — | **49.8%** |
+| Female | 0.7873 | 0.0109 |
+| Male | 0.7597 | 0.0110 |
+| **Gap (F − M)** | **+0.0276** | **−0.0001** |
+
+*Note: the baseline here differs from Project 1 (+0.0285) because Project 1's templates had trailing spaces and one capitalized emotion word.*
+
+### Attempt 1 — CDA: no change (0.0%)
+
+CDA is meant to rebalance **training** data, but here the model is not retrained. Because every female name in the dataset already has a male counterpart, swapping names simply reproduced the same 4,096 sentences, so the gap could not change. This was a design mistake, and I've kept it in the notebook to document it.
+
+### Attempt 2 — Score calibration
+
+| Metric | Before | After |
+|---|---|---|
+| Gap on positive sentences | +0.0276 | +0.0139 |
+| Gap on negative sentences | −0.0001 | −0.0130 |
+| Total gap (sum of both, absolute) | 0.0277 | 0.0269 |
+| Female accuracy | 94.7% | 94.6% |
+| Male accuracy | 93.6% | 93.8% |
 
 ---
 
@@ -61,38 +64,30 @@ far more practical.
 
 ## Key Finding
 
-A **49.8% reduction in gender bias** was achieved using score 
-calibration — with less than 0.1% drop in accuracy for either group.
+At first, calibration looked like a success: the gap on positive sentences fell by about half (0.0276 → 0.0139), and accuracy barely changed.
 
-This shows that meaningful fairness improvements are possible 
-without expensive model retraining — making calibration a 
-practical tool for real-world NLP deployments.
+Looking at the full results told a different story. Calibration shifts every female score down and every male score up by the same constant, so it also **created a gap of almost the same size on negative sentences** (−0.0001 → −0.0130). Across both slices, the total gap barely changed (0.0277 → 0.0269). The bias was moved, not removed.
 
+**What I learned:**
+- A fairness fix has to be evaluated on **every slice** of the data, not only the slice it was designed for.
+- The calibration offset was estimated and evaluated on the **same sentences**. A fair test needs held-out data.
+- Group-specific calibration requires knowing each input's demographic group at prediction time, which is often unavailable or inappropriate in practice.
 ---
 
 ## Open Questions
 
-This project raises further questions worth investigating:
-
-- Does calibration hold when tested on real-world social media 
-  data beyond controlled templates?
-- Can the same technique reduce racial and dialect bias 
-  simultaneously?
-- What happens when bias is intersectional — race and gender 
-  combined?
+- Would a calibration fitted **per sentiment class** (or per score range), and tested on held-out templates, actually reduce the total gap?
+- Do training-time methods (CDA with fine-tuning, or fairness-constrained fine-tuning) reduce the gap without shifting it elsewhere?
+- Does the same pattern appear for race and dialect, or for intersectional groups?
 
 ---
 
 ## Connection to Project 1
 
-This is the second part of a two-project series on fairness 
-in NLP:
+This is the second part of a two-project series on fairness in NLP:
 
-- [Project 1 — Measuring Bias](https://github.com/krishna-Varshini-Ilindra/sentiment-bias-nlp): 
-  Found gender gap of 0.0276 and dialect confidence asymmetry 
-  across SAE and AAE text
-- **Project 2 — Fixing Bias** (this repo): 
-  Reduced the gender gap by 49.8% using score calibration
+- [Project 1 — Measuring Bias](https://github.com/krishna-Varshini-Ilindra/sentiment-bias-nlp): measured race, gender, and dialect gaps in a RoBERTa sentiment model
+- **Project 2 — Attempting to Reduce Bias** (this repo): tested CDA and score calibration, and found that calibration shifted the gender gap between slices rather than removing it
 
 ---
 
@@ -106,9 +101,6 @@ in NLP:
 
 ## References
 
-- Kiritchenko & Mohammad (2018). Examining Gender and Race Bias 
-  in Two Hundred Sentiment Analysis Systems. SemEval 2018.
-- Zhao et al. (2018). Gender Bias in Coreference Resolution: 
-  Evaluation and Debiasing Methods. NAACL 2018.
-- Agrawal et al. (2020). A Comprehensive Analysis of Preprocessing 
-  for Word Representation Learning in Affective Tasks. ACL 2020.
+- Kiritchenko, S. & Mohammad, S. (2018). Examining Gender and Race Bias in Two Hundred Sentiment Analysis Systems. *\*SEM 2018*.
+- Zhao, J. et al. (2018). Gender Bias in Coreference Resolution: Evaluation and Debiasing Methods. *NAACL 2018*.
+- Barbieri, F. et al. (2020). TweetEval: Unified Benchmark and Comparative Evaluation for Tweet Classification. *Findings of EMNLP 2020*.
